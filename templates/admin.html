@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>License Admin</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 30px; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ccc; padding: 10px; text-align: left; }
+        th { background: #f4f4f4; }
+        .btn { padding: 8px 12px; background: #4CAF50; color: white; border: none; cursor: pointer; }
+        .btn:hover { background: #45a049; }
+    </style>
+</head>
+<body>
+    <h1>License Keys</h1>
+
+    <form action="/admin/add" method="post">
+        <button type="submit" class="btn">Add New License Key</button>
+    </form>
+
+    <br><br>
+    <table>
+        <tr>
+            <th>License Key</th>
+            <th>HWID</th>
+            <th>Status</th>
+        </tr>
+        {% for license in licenses %}
+        <tr>
+            <td>{{ license.license_key }}</td>
+            <td>{{ license.hwid if license.hwid else "Not Used" }}</td>
+            <td>{{ license.status }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>

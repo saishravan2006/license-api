@@ -65,7 +65,7 @@ async def admin_page(request: Request):
     return templates.TemplateResponse("admin.html", {"request": request, "licenses": licenses})
 
 
-@app.post("/add_license")
+@app.post("/admin/add_license")
 async def add_license(license_key: str = Form(...), owner: str = Form(...)):
     await db.licenses.insert_one({"license_key": license_key, "owner": owner})
     return RedirectResponse(url="/admin", status_code=302)

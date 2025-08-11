@@ -1,92 +1,71 @@
-from fastapi import FastAPI, Request, Form, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
 from pymongo import MongoClient
-from bson.objectid import ObjectId
-import random, string
+import random
+import string
+import os
 
 app = FastAPI()
 
-# MongoDB connection
-MONGO_URI = "YOUR_MONGODB_URI"
-client = MongoClient(MONGO_URI)
+# ===== MongoDB Connection =====
+MONGO_URL = os.getenv("MONGO_URL", "your-mongo-url-here")
+client = MongoClient(MONGO_URL)
 db = client["license_db"]
-licenses_col = db["licenses"]
+licenses = db["licenses"]
 
-# Static files & templates
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# ===== Templates =====
 templates = Jinja2Templates(directory="templates")
 
-# Admin credentials (hardcoded)
-ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "password"
-
-# In-memory session
-logged_in_users = set()
-
-class LicenseValidationRequest(BaseModel):
-    license_key: str
-    hwid: str
-
+# ===== License Generator =====
 def generate_license_key():
-    parts = ["".join(random.choices(string.ascii_uppercase + string.digits, k=4)) for _ in range(4)]
-    return "-".join(parts)
+    return "-".join(
+        "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
+        for _ in range(4)
+    )
 
+# ===== Routes =====
 @app.get("/", response_class=HTMLResponse)
-async def root():
-    return {"message": "License API is running"}
-
-@app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
-
-@app.post("/login")
-async def login(request: Request, username: str = Form(...), password: str = Form(...)):
-    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-        logged_in_users.add(request.client.host)
-        return RedirectResponse("/admin", status_code=302)
-    return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
+async def home():
+    return "<h1>License API is running</h1>"
 
 @app.get("/admin", response_class=HTMLResponse)
-async def admin_page(request: Request):
-    if request.client.host not in logged_in_users:
-        return RedirectResponse("/login")
-    licenses = list(licenses_col.find())
-    return templates.TemplateResponse("admin.html", {"request": request, "licenses": licenses})
+async def admin_dashboard(request: Request):
+    license_list = list(licenses.find({}, {"_id": 0}))
+    return templates.TemplateResponse("admin.html", {"request": request, "licenses": license_list})
 
-@app.post("/admin/add_license")
+@app.post("/admin/add", response_class=HTMLResponse)
 async def add_license(request: Request):
-    if request.client.host not in logged_in_users:
-        return RedirectResponse("/login")
-    new_license = {
-        "license_key": generate_license_key(),
-        "hwid": None,
-        "status": "inactive"
-    }
-    licenses_col.insert_one(new_license)
-    return RedirectResponse("/admin", status_code=302)
+    new_license = generate_license_key()
+    licenses.insert_one({"license_key": new_license, "hwid": None, "status": "unused"})
+    license_list = list(licenses.find({}, {"_id": 0}))
+    return templates.TemplateResponse("admin.html", {"request": request, "licenses": license_list})
 
+# ===== API Endpoint for Validation =====
 @app.post("/api/validate")
-async def validate_license(data: LicenseValidationRequest):
-    lic = licenses_col.find_one({"license_key": data.license_key})
+async def validate_license(data: dict):
+    license_key = data.get("license_key")
+    hwid = data.get("hwid")
+
+    lic = licenses.find_one({"license_key": license_key})
     if not lic:
-        return {"status": "error", "message": "License not found"}
+        return {"status": "error", "message": "License key not found"}
 
     if lic["hwid"] is None:
-        licenses_col.update_one({"_id": lic["_id"]}, {"$set": {"hwid": data.hwid, "status": "active"}})
+        licenses.update_one({"license_key": license_key}, {"$set": {"hwid": hwid, "status": "active"}})
         return {"status": "success", "message": "License activated"}
-
-    if lic["hwid"] != data.hwid:
-        return {"status": "error", "message": "HWID mismatch"}
-
-    return {"status": "success", "message": "License validated"}
+    elif lic["hwid"] == hwid:
+        return {"status": "success", "message": "License already active for this device"}
+    else:
+        return {"status": "error", "message": "License already bound to another device"}
 
 @app.post("/api/logout")
-async def logout_license(data: LicenseValidationRequest):
-    lic = licenses_col.find_one({"license_key": data.license_key, "hwid": data.hwid})
-    if not lic:
-        return {"status": "error", "message": "License not found or HWID mismatch"}
-    licenses_col.update_one({"_id": lic["_id"]}, {"$set": {"hwid": None, "status": "inactive"}})
-    return {"status": "success", "message": "License released"}
+async def logout_license(data: dict):
+    license_key = data.get("license_key")
+    hwid = data.get("hwid")
+
+    lic = licenses.find_one({"license_key": license_key})
+    if lic and lic["hwid"] == hwid:
+        licenses.update_one({"license_key": license_key}, {"$set": {"hwid": None, "status": "unused"}})
+        return {"status": "success", "message": "License released"}
+    return {"status": "error", "message": "Invalid license or HWID"}

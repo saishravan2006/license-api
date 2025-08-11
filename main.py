@@ -1,86 +1,92 @@
 import os
-import asyncio
 import certifi
 from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from motor.motor_asyncio import AsyncIOMotorClient
-from starlette.templating import Jinja2Templates
+from bson.objectid import ObjectId
+from typing import Optional
 
-# --- Load environment variables ---
-MONGO_URI = os.environ.get("MONGO_URI")
-if not MONGO_URI:
-    raise RuntimeError("❌ MONGO_URI environment variable not set!")
+# Configuration: hardcoded URI (as requested). You can override with MONGO_URI env var if you want later.
+MONGO_URI = os.environ.get("MONGO_URI") or "mongodb+srv://saishravan554:Stark123@cluster0.6hjlboi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+DB_NAME = os.environ.get("DB_NAME") or "license_db"
+COLLECTION_NAME = os.environ.get("COLLECTION_NAME") or "licenses"
 
-# --- MongoDB connection ---
-mongo_client = AsyncIOMotorClient(
-    MONGO_URI,
-    tls=True,
-    tlsCAFile=certifi.where(),
-    serverSelectionTimeoutMS=10000
-)
-db = mongo_client["licenses_db"]  # Change to your actual DB name
+# Ensure folders exist
+if not os.path.exists("static"):
+    os.makedirs("static", exist_ok=True)
+if not os.path.exists("templates"):
+    os.makedirs("templates", exist_ok=True)
 
-# --- FastAPI app ---
 app = FastAPI()
-
-# Static & Templates
-app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
+# Connect to MongoDB with explicit CA bundle to avoid TLS handshake issues
+mongo_client = AsyncIOMotorClient(MONGO_URI, tls=True, tlsCAFile=certifi.where())
+db = mongo_client[DB_NAME]
+collection = db[COLLECTION_NAME]
 
-# --- Test DB connection on startup ---
-@app.on_event("startup")
-async def startup_db_client():
-    try:
-        await mongo_client.server_info()
-        print("✅ Connected to MongoDB successfully")
-    except Exception as e:
-        print("❌ MongoDB connection failed:", e)
-        raise e
+def doc_to_dict(doc):
+    if not doc:
+        return None
+    d = dict(doc)
+    _id = d.pop("_id", None)
+    if _id is not None:
+        d["id"] = str(_id)
+    return d
 
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    mongo_client.close()
-
-
-# --- Routes ---
 @app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
-
-
-@app.post("/login")
-async def login(request: Request, username: str = Form(...), password: str = Form(...)):
-    admin = await db.admins.find_one({"username": username, "password": password})
-    if not admin:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    return RedirectResponse(url="/admin", status_code=302)
-
+async def root():
+    return RedirectResponse(url="/admin")
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page(request: Request):
-    licenses = await db.licenses.find().to_list(length=100)
-    return templates.TemplateResponse("admin.html", {"request": request, "licenses": licenses})
+    docs = []
+    cursor = collection.find({})
+    async for doc in cursor:
+        docs.append(doc_to_dict(doc))
+    return templates.TemplateResponse("admin.html", {"request": request, "licenses": docs})
 
+
+import random
+import string
+from pydantic import BaseModel
+
+def generate_license_key(length=16):
+    """Generate a random license key like 'AB12-CD34-EF56-GH78'."""
+    chars = string.ascii_uppercase + string.digits
+    key = '-'.join(
+        ''.join(random.choice(chars) for _ in range(4))
+        for _ in range(length // 4)
+    )
+    return key
 
 @app.post("/admin/add_license")
-async def add_license(license_key: str = Form(...), owner: str = Form(...)):
-    await db.licenses.insert_one({"license_key": license_key, "owner": owner})
-    return RedirectResponse(url="/admin", status_code=302)
+async def admin_add_license():
+    license_key = generate_license_key()
+    await collection.insert_one({
+        "key": license_key,
+        "hwid": None,
+        "activated": False
+    })
+    return {"license_key": license_key, "status": "created"}
 
+class ActivationRequest(BaseModel):
+    license_key: str
+    hwid: str
 
-@app.get("/health")
-async def health_check():
-    try:
-        await mongo_client.server_info()
-        return {"status": "ok"}
-    except Exception as e:
-        return {"status": "error", "details": str(e)}
+@app.post("/activate_license")
+async def activate_license(data: ActivationRequest):
+    license_doc = await collection.find_one({"key": data.license_key})
+    if not license_doc:
+        raise HTTPException(status_code=404, detail="Invalid license key")
+    
+    if license_doc.get("activated"):
+        raise HTTPException(status_code=400, detail="License already activated")
 
-
-# --- Run locally ---
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+    await collection.update_one(
+        {"key": data.license_key},
+        {"$set": {"hwid": data.hwid, "activated": True}}
+    )
+    return {"status": "activated", "license_key": data.license_key}

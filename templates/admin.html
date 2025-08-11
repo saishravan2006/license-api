@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>License Admin Panel</title>
+    <style>
+        body { background-color: #121212; color: #fff; font-family: Arial, sans-serif; margin: 0; padding: 0; }
+        h1 { text-align: center; padding: 20px; }
+        .container { width: 90%; margin: auto; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background-color: #1e1e1e; border-radius: 8px; overflow: hidden; }
+        th, td { padding: 12px; text-align: center; border-bottom: 1px solid #333; }
+        th { background-color: #222; }
+        tr:hover { background-color: #2a2a2a; }
+        .btn { padding: 8px 14px; border: none; cursor: pointer; border-radius: 4px; font-size: 14px; }
+        .btn-generate { background-color: #4CAF50; color: white; }
+        .btn-revoke { background-color: #e74c3c; color: white; }
+        .top-bar { display: flex; justify-content: space-between; align-items: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="top-bar">
+            <h1>License Admin Panel</h1>
+            <form method="post" action="/generate">
+                <button class="btn btn-generate">+ Add New License</button>
+            </form>
+        </div>
+        <table>
+            <thead>
+                <tr><th>License Key</th><th>HWID</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+                {% for license in licenses %}
+                <tr>
+                    <td>{{ license.license_key }}</td>
+                    <td>{{ license.hwid if license.hwid else "Not Activated" }}</td>
+                    <td>
+                        <form method="post" action="/revoke/{{ license._id }}">
+                            <button class="btn btn-revoke">Revoke</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>

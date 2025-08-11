@@ -1,0 +1,64 @@
+import os
+from fastapi import FastAPI, Request, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from pymongo import MongoClient
+from bson.objectid import ObjectId
+
+# Ensure static folder exists
+if not os.path.exists("static"):
+    os.makedirs("static")
+
+# MongoDB connection
+client = MongoClient(
+    "mongodb+srv://saishravan554:Stark123@cluster0.6hjlboi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+)
+db = client["license_db"]
+collection = db["licenses"]
+
+# FastAPI setup
+app = FastAPI()
+
+# Mount static and templates
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
+
+# Routes
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    return RedirectResponse(url="/admin")
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page(request: Request):
+    licenses = list(collection.find())
+    return templates.TemplateResponse(
+        "admin.html", {"request": request, "licenses": licenses}
+    )
+
+@app.post("/add_license")
+async def add_license(key: str = Form(...), hwid: str = Form(...)):
+    collection.insert_one({"key": key, "hwid": hwid})
+    return RedirectResponse(url="/admin", status_code=303)
+
+@app.post("/delete_license/{license_id}")
+async def delete_license(license_id: str):
+    collection.delete_one({"_id": ObjectId(license_id)})
+    return RedirectResponse(url="/admin", status_code=303)
+
+@app.get("/verify/{key}/{hwid}")
+async def verify_license(key: str, hwid: str):
+    lic = collection.find_one({"key": key})
+    if not lic:
+        return {"status": "invalid"}
+    if lic.get("hwid") and lic["hwid"] != hwid:
+        return {"status": "hwid_mismatch"}
+    if not lic.get("hwid"):
+        collection.update_one({"_id": lic["_id"]}, {"$set": {"hwid": hwid}})
+    return {"status": "valid"}
+
+# Local run
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+

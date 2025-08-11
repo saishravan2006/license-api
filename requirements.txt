@@ -4,3 +4,4 @@ motor
 certifi
 python-multipart
 jinja2
+itsdangerous

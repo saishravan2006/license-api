@@ -14,7 +14,7 @@ ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "password123"
 
 # MongoDB config (only for licenses)
-MONGO_URI = os.environ.get("MONGO_URI") or "mongodb+srv://saishravan554:Stark123@cluster0.6hjlboi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+MONGO_URI = os.environ.get("MONGO_URI")
 DB_NAME = os.environ.get("DB_NAME") or "license_db"
 COLLECTION_NAME = os.environ.get("COLLECTION_NAME") or "licenses"
 

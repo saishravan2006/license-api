@@ -1,14 +1,19 @@
 import os
 import certifi
-from fastapi import FastAPI, Request, Form, HTTPException
+from fastapi import FastAPI, Request, Form, HTTPException, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson.objectid import ObjectId
 from typing import Optional
+from starlette.middleware.sessions import SessionMiddleware
 
-# Configuration: hardcoded URI (as requested). You can override with MONGO_URI env var if you want later.
+# ---- Hardcoded admin credentials ----
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "password123"
+
+# MongoDB config (only for licenses)
 MONGO_URI = os.environ.get("MONGO_URI") or "mongodb+srv://saishravan554:Stark123@cluster0.6hjlboi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 DB_NAME = os.environ.get("DB_NAME") or "license_db"
 COLLECTION_NAME = os.environ.get("COLLECTION_NAME") or "licenses"
@@ -20,9 +25,10 @@ if not os.path.exists("templates"):
     os.makedirs("templates", exist_ok=True)
 
 app = FastAPI()
+app.add_middleware(SessionMiddleware, secret_key="super-secret-session-key")  # session for login
 templates = Jinja2Templates(directory="templates")
 
-# Connect to MongoDB with explicit CA bundle to avoid TLS handshake issues
+# MongoDB connection
 mongo_client = AsyncIOMotorClient(MONGO_URI, tls=True, tlsCAFile=certifi.where())
 db = mongo_client[DB_NAME]
 collection = db[COLLECTION_NAME]
@@ -36,19 +42,42 @@ def doc_to_dict(doc):
         d["id"] = str(_id)
     return d
 
+# ---- Login Routes ----
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+
+@app.post("/login")
+async def login(request: Request, username: str = Form(...), password: str = Form(...)):
+    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+        request.session["logged_in"] = True
+        return RedirectResponse(url="/admin", status_code=303)
+    return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
+
+@app.get("/logout")
+async def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/login")
+
+# Dependency to require login
+def require_login(request: Request):
+    if not request.session.get("logged_in"):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
 @app.get("/", response_class=HTMLResponse)
 async def root():
     return RedirectResponse(url="/admin")
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page(request: Request):
+    require_login(request)
     docs = []
     cursor = collection.find({})
     async for doc in cursor:
         docs.append(doc_to_dict(doc))
     return templates.TemplateResponse("admin.html", {"request": request, "licenses": docs})
 
-
+# ---- License generation & activation ----
 import random
 import string
 from pydantic import BaseModel
@@ -63,7 +92,8 @@ def generate_license_key(length=16):
     return key
 
 @app.post("/admin/add_license")
-async def admin_add_license():
+async def admin_add_license(request: Request):
+    require_login(request)
     license_key = generate_license_key()
     await collection.insert_one({
         "key": license_key,

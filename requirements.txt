@@ -1,8 +1,5 @@
 fastapi
-uvicorn[standard]
-jinja2
-python-multipart
+uvicorn
 motor
 certifi
-dnspython
-python-dotenv
+python-multipart

@@ -9,7 +9,7 @@ import os
 app = FastAPI()
 
 # ===== MongoDB Connection =====
-MONGO_URL = os.getenv("MONGO_URL", "your-mongo-url-here")
+MONGO_URL = os.getenv("MONGO_URL", "mongodb+srv://saishravan554:stark123@cluster0.6hjlboi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 client = MongoClient(MONGO_URL)
 db = client["license_db"]
 licenses = db["licenses"]
